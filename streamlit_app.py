@@ -3,47 +3,19 @@ import pandas as pd
 import numpy as np
 import seaborn as sns
 import streamlit.components.v1 as components
-from src.helpers import load_data
+from src.helpers import (
+    calculate_points_per_player,
+    calculate_value_per_result,
+    get_points_per_team_each_round,
+    join_team_points,
+    load_data,
+    opening_white_black_win_ratio_and_elo_diff_scatterplot,
+    player_values_for_team,
+    best_players_per_team,
+)
 from src.plots import *
 
 st.title("Chess Olympiad 2022")
-
-
-@st.cache
-def calculate_points_per_player(df):
-    white_points = df.groupby("white", as_index=False).agg(
-        {"white_score": ["sum", "count"]}
-    )
-    white_points.columns = list(map("_".join, white_points.columns.values))
-    white_points = white_points.rename(
-        columns={
-            "white_": "player_name",
-            "white_score_sum": "white_points",
-            "white_score_count": "white_games",
-        }
-    )
-
-    black_points = df.groupby("black", as_index=False).agg(
-        {"black_score": ["sum", "count"]}
-    )
-    black_points.columns = list(map("_".join, black_points.columns.values))
-    black_points = black_points.rename(
-        columns={
-            "black_": "player_name",
-            "black_score_sum": "black_points",
-            "black_score_count": "black_games",
-        }
-    )
-
-    merged_points = pd.merge(white_points, black_points, how="outer", on="player_name")
-    merged_points["total_points"] = (
-        merged_points["white_points"] + merged_points["black_points"]
-    )
-    merged_points["total_games_played"] = (
-        merged_points["white_games"] + merged_points["black_games"]
-    )
-
-    return merged_points
 
 
 def games_per_openings(df, minimum_game_count: int):
@@ -76,10 +48,20 @@ def opening_average_and_median_elo_diff(df):
 data_load_state = st.text("Loading data...")
 
 # Load data into the dataframe.
-df = load_data()
+raw_data = load_data()
+team_points = get_points_per_team_each_round(raw_data)
+df = join_team_points(raw_data, team_points)
+df = calculate_value_per_result(df)
 
 st.subheader("Raw data")
 st.write(df.head())
+
+st.subheader("Counts team points")
+
+st.dataframe(team_points)
+
+team_points_per_color_plot = team_points_per_color_distribution_plot(team_points)
+st.plotly_chart(team_points_per_color_plot)
 
 players = set(df["white"].to_list() + df["black"].to_list())
 
@@ -95,10 +77,52 @@ col4.metric("Black wins: ", df[df["result"] == "0-1"].shape[0])
 st.markdown("### Best performing players")
 player_stats = calculate_points_per_player(df)
 st.dataframe(player_stats)
+mvp_plot = most_valuable_players_plot(player_stats)
+st.plotly_chart(mvp_plot)
+
+st.markdown("### Best performing players for each team")
+team = st.selectbox("Select a team!", set(df["whiteteam"].to_list()))
+players_per_team = best_players_per_team(df, player_stats)
+team_players = player_values_for_team(players_per_team, team)
+st.dataframe(team_players)
+
 
 st.subheader("Opening stats")
 min_games = st.slider("Minimum number of games", 0, 300)
 df1 = games_per_openings(df, min_games)
 df2 = opening_average_and_median_elo_diff(df)
 df3 = pd.merge(df1, df2, "left", on="opening")
+df3 = df3.reset_index()
+# df3.index.names = ["opening"]
 st.write(df3)
+
+
+stats = opening_win_ratio_plot(df3)
+st.plotly_chart(stats)
+
+# elo_result_scatterplot = elo_result_scatterplot(df)
+# st.plotly_chart(elo_result_scatterplot)
+rounds = df.groupby(["round", "result"]).size().reset_index(name="counts")
+st.write(rounds)
+
+rounds_plot = game_result_each_round_plot(df)
+st.plotly_chart(rounds_plot)
+
+board_plot = board_win_ratio(df)
+st.plotly_chart(board_plot)
+
+op_win_scatterplot = opening_win_ratio_and_elo_diff_scatterplot(df3)
+st.markdown("## Elo diff and win ratio scatterplots")
+st.plotly_chart(op_win_scatterplot)
+
+op_black_scatterplot = opening_black_ratio_and_elo_diff_scatterplot(df3)
+st.markdown("## Elo diff and black ratio scatterplots")
+st.plotly_chart(op_black_scatterplot)
+
+op_draw_scatterplot = opening_draw_ratio_and_elo_diff_scatterplot(df3)
+st.markdown("## Elo diff and draw ratio scatterplots")
+st.plotly_chart(op_draw_scatterplot)
+
+op_win_ratios_scatterplot = opening_white_black_win_ratio_and_elo_diff_scatterplot(df3)
+st.markdown("## White and Black win ratios scatterplots")
+st.plotly_chart(op_win_ratios_scatterplot)
